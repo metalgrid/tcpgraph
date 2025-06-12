@@ -19,17 +19,21 @@ pub struct DirectionalBandwidth {
 pub struct BandwidthCalculator {
     packet_buffer: VecDeque<PacketInfo>,
     bandwidth_history: VecDeque<BandwidthData>,
+    smoothing_buffer: VecDeque<DirectionalBandwidth>,
     max_history: usize,
     window_duration: Duration,
+    smoothing_samples: usize,
 }
 
 impl BandwidthCalculator {
-    pub fn new(window_duration: Duration, max_history: usize) -> Self {
+    pub fn new(window_duration: Duration, max_history: usize, smoothing_samples: usize) -> Self {
         Self {
             packet_buffer: VecDeque::new(),
             bandwidth_history: VecDeque::new(),
+            smoothing_buffer: VecDeque::new(),
             max_history,
             window_duration,
+            smoothing_samples,
         }
     }
 
@@ -74,9 +78,29 @@ impl BandwidthCalculator {
             self.bandwidth_history.pop_front();
         }
 
-        DirectionalBandwidth {
+        let raw_bandwidth = DirectionalBandwidth {
             inbound: inbound_bps,
             outbound: outbound_bps,
+        };
+
+        // Add to smoothing buffer
+        self.smoothing_buffer.push_back(raw_bandwidth.clone());
+        if self.smoothing_buffer.len() > self.smoothing_samples {
+            self.smoothing_buffer.pop_front();
+        }
+
+        // Calculate smoothed bandwidth
+        let smoothed_inbound = self.smoothing_buffer.iter()
+            .map(|b| b.inbound)
+            .sum::<f64>() / self.smoothing_buffer.len() as f64;
+        
+        let smoothed_outbound = self.smoothing_buffer.iter()
+            .map(|b| b.outbound)
+            .sum::<f64>() / self.smoothing_buffer.len() as f64;
+
+        DirectionalBandwidth {
+            inbound: smoothed_inbound,
+            outbound: smoothed_outbound,
         }
     }
 
@@ -116,11 +140,13 @@ impl BandwidthCalculator {
 pub async fn start_bandwidth_monitor(
     packet_rx: mpsc::Receiver<PacketInfo>,
     update_interval: Duration,
+    smoothing_samples: usize,
 ) -> mpsc::Receiver<DirectionalBandwidth> {
     let (tx, rx) = mpsc::channel();
     let mut calculator = BandwidthCalculator::new(
         Duration::from_secs(1),
         300, // Keep 5 minutes of history
+        smoothing_samples,
     );
 
     tokio::spawn(async move {

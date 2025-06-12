@@ -27,13 +27,13 @@ async fn main() -> Result<()> {
         println!("Duration: {}s", duration);
     }
 
-    let packet_capture = PacketCapture::new(args.interface.clone(), args.filter.clone());
+    let packet_capture = PacketCapture::new(args.interface.clone(), args.filter.clone(), args.payload_only);
     
     let packet_rx = packet_capture.start_capture().await
         .context("Failed to start packet capture")?;
     
     let update_interval = Duration::from_secs(args.interval);
-    let bandwidth_rx = start_bandwidth_monitor(packet_rx, update_interval).await;
+    let bandwidth_rx = start_bandwidth_monitor(packet_rx, update_interval, args.smoothing).await;
     
     let app = App::new(args.interface, args.filter);
     

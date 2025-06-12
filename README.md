@@ -66,6 +66,16 @@ tcpgraph -i wlan0 -f "tcp" --interval 2
 tcpgraph -i any -f "tcp"
 ```
 
+**Monitor with payload-only counting (like Ookla speedtest):**
+```bash
+tcpgraph -i eth0 -f "tcp" --payload-only
+```
+
+**Monitor with increased smoothing to reduce spikes:**
+```bash
+tcpgraph -i eth0 -f "tcp" --smoothing 5
+```
+
 **Monitor SSH traffic for 60 seconds:**
 ```bash
 tcpgraph -i eth0 -f "tcp port 22" --duration 60
@@ -129,6 +139,27 @@ The application displays:
   - **Specific interfaces** (e.g., eth0, wlan0): Uses that interface's MAC address
   - **"any" interface**: Uses MAC addresses from all active network interfaces
 - **Edge Cases**: Broadcast/multicast traffic properly classified based on source interface
+
+### Bandwidth Calculation Accuracy
+
+tcpgraph offers two measurement modes to address discrepancies with speed testing tools:
+
+#### **Standard Mode (default)**
+- Counts entire Ethernet frames including all headers
+- Shows total network utilization including protocol overhead
+- Typically 10-20% higher than application-layer tools like Ookla
+
+#### **Payload-Only Mode (`--payload-only`)**
+- Strips Layer 2, 3, and 4 headers 
+- Counts only application data payload
+- More comparable to Ookla speedtest results
+- Better for measuring actual data transfer rates
+
+#### **Smoothing (`--smoothing N`)**
+- Reduces spikes and drops in measurements
+- Uses moving average over N samples (default: 3)
+- Higher values = smoother but less responsive
+- Lower values = more responsive but potentially spiky
 
 ### Controls
 

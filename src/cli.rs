@@ -19,6 +19,19 @@ pub struct Args {
 
     #[arg(long, help = "Total monitoring duration in seconds")]
     pub duration: Option<u64>,
+
+    #[arg(
+        long,
+        help = "Count only payload data (excludes headers) for more accurate application-layer bandwidth"
+    )]
+    pub payload_only: bool,
+
+    #[arg(
+        long,
+        default_value = "3",
+        help = "Number of samples to use for smoothing bandwidth calculations (reduces spikes)"
+    )]
+    pub smoothing: usize,
 }
 
 impl Args {

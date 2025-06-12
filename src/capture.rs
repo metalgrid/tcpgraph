@@ -1,7 +1,12 @@
 use anyhow::{Context, Result};
 use pcap::{Capture, Device};
 use pnet::datalink;
-use pnet::packet::ethernet::EthernetPacket;
+use pnet::packet::ethernet::{EthernetPacket, EtherTypes};
+use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::ipv6::Ipv6Packet;
+use pnet::packet::tcp::TcpPacket;
+use pnet::packet::ip::IpNextHeaderProtocols;
+use pnet::packet::Packet;
 use pnet::util::MacAddr;
 use std::collections::HashSet;
 use std::sync::mpsc;
@@ -10,6 +15,7 @@ use tokio::task;
 pub struct PacketCapture {
     interface: String,
     filter: String,
+    payload_only: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -27,8 +33,8 @@ pub struct PacketInfo {
 }
 
 impl PacketCapture {
-    pub fn new(interface: String, filter: String) -> Self {
-        Self { interface, filter }
+    pub fn new(interface: String, filter: String, payload_only: bool) -> Self {
+        Self { interface, filter, payload_only }
     }
 
     fn get_local_macs(interface_name: &str) -> HashSet<MacAddr> {
@@ -48,6 +54,49 @@ impl PacketCapture {
         }
         
         local_macs
+    }
+
+    fn get_payload_size(packet_data: &[u8]) -> u32 {
+        if let Some(eth_packet) = EthernetPacket::new(packet_data) {
+            match eth_packet.get_ethertype() {
+                EtherTypes::Ipv4 => {
+                    if let Some(ipv4_packet) = Ipv4Packet::new(eth_packet.payload()) {
+                        let total_length = ipv4_packet.get_total_length() as u32;
+                        let header_length = (ipv4_packet.get_header_length() as u32) * 4;
+                        
+                        // For TCP, subtract TCP header as well
+                        if ipv4_packet.get_next_level_protocol() == IpNextHeaderProtocols::Tcp {
+                            if let Some(tcp_packet) = TcpPacket::new(ipv4_packet.payload()) {
+                                let tcp_header_length = (tcp_packet.get_data_offset() as u32) * 4;
+                                return total_length.saturating_sub(header_length + tcp_header_length);
+                            }
+                        }
+                        
+                        // For other protocols, just subtract IP header
+                        return total_length.saturating_sub(header_length);
+                    }
+                }
+                EtherTypes::Ipv6 => {
+                    if let Some(ipv6_packet) = Ipv6Packet::new(eth_packet.payload()) {
+                        let payload_length = ipv6_packet.get_payload_length() as u32;
+                        
+                        // For TCP, subtract TCP header
+                        if ipv6_packet.get_next_header() == IpNextHeaderProtocols::Tcp {
+                            if let Some(tcp_packet) = TcpPacket::new(ipv6_packet.payload()) {
+                                let tcp_header_length = (tcp_packet.get_data_offset() as u32) * 4;
+                                return payload_length.saturating_sub(tcp_header_length);
+                            }
+                        }
+                        
+                        return payload_length;
+                    }
+                }
+                _ => {}
+            }
+        }
+        
+        // Fallback to full packet size if we can't parse headers
+        packet_data.len() as u32
     }
 
     fn determine_direction(packet_data: &[u8], local_macs: &HashSet<MacAddr>) -> TrafficDirection {
@@ -84,8 +133,9 @@ impl PacketCapture {
         let interface = self.interface.clone();
         let filter = self.filter.clone();
 
+        let payload_only = self.payload_only;
         task::spawn_blocking(move || {
-            Self::capture_packets(interface, filter, tx)
+            Self::capture_packets(interface, filter, payload_only, tx)
         });
 
         Ok(rx)
@@ -94,6 +144,7 @@ impl PacketCapture {
     fn capture_packets(
         interface: String,
         filter: String,
+        payload_only: bool,
         tx: mpsc::Sender<PacketInfo>,
     ) -> Result<()> {
         let device = if interface == "any" {
@@ -132,9 +183,15 @@ impl PacketCapture {
                 Ok(packet) => {
                     let direction = Self::determine_direction(&packet.data, &local_macs);
                     
+                    let size = if payload_only {
+                        Self::get_payload_size(&packet.data)
+                    } else {
+                        packet.header.caplen
+                    };
+                    
                     let packet_info = PacketInfo {
                         timestamp: std::time::SystemTime::now(),
-                        size: packet.header.caplen,
+                        size,
                         direction,
                     };
 

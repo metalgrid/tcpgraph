@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 
 #[test]
 fn test_bandwidth_calculator_empty() {
-    let mut calc = BandwidthCalculator::new(Duration::from_secs(1), 100);
+    let mut calc = BandwidthCalculator::new(Duration::from_secs(1), 100, 1);
     let bandwidth = calc.calculate_bandwidth();
     assert_eq!(bandwidth.inbound, 0.0);
     assert_eq!(bandwidth.outbound, 0.0);
@@ -12,7 +12,7 @@ fn test_bandwidth_calculator_empty() {
 
 #[test]
 fn test_bandwidth_calculator_single_packet() {
-    let mut calc = BandwidthCalculator::new(Duration::from_secs(1), 100);
+    let mut calc = BandwidthCalculator::new(Duration::from_secs(1), 100, 1);
     
     let packet = PacketInfo {
         timestamp: SystemTime::now(),
@@ -30,7 +30,7 @@ fn test_bandwidth_calculator_single_packet() {
 
 #[test]
 fn test_bandwidth_calculator_multiple_packets() {
-    let mut calc = BandwidthCalculator::new(Duration::from_secs(1), 100);
+    let mut calc = BandwidthCalculator::new(Duration::from_secs(1), 100, 1);
     let now = SystemTime::now();
     
     for i in 0..5 {
@@ -48,7 +48,7 @@ fn test_bandwidth_calculator_multiple_packets() {
 
 #[test]
 fn test_bandwidth_calculator_history_limit() {
-    let mut calc = BandwidthCalculator::new(Duration::from_secs(1), 2);
+    let mut calc = BandwidthCalculator::new(Duration::from_secs(1), 2, 1);
     
     for _ in 0..5 {
         calc.calculate_bandwidth();
