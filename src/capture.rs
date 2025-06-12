@@ -1,12 +1,9 @@
 use anyhow::{Context, Result};
 use pcap::{Capture, Device};
 use pnet::datalink;
-use pnet::packet::ethernet::{EthernetPacket, EtherTypes};
-use pnet::packet::ipv4::Ipv4Packet;
-use pnet::packet::ipv6::Ipv6Packet;
-use pnet::packet::Packet;
+use pnet::packet::ethernet::EthernetPacket;
+use pnet::util::MacAddr;
 use std::collections::HashSet;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::mpsc;
 use tokio::task;
 
@@ -34,12 +31,8 @@ impl PacketCapture {
         Self { interface, filter }
     }
 
-    fn get_local_ips(interface_name: &str) -> HashSet<IpAddr> {
-        let mut local_ips = HashSet::new();
-        
-        // Always include localhost
-        local_ips.insert(IpAddr::V4(Ipv4Addr::LOCALHOST));
-        local_ips.insert(IpAddr::V6(Ipv6Addr::LOCALHOST));
+    fn get_local_macs(interface_name: &str) -> HashSet<MacAddr> {
+        let mut local_macs = HashSet::new();
         
         // Get all network interfaces
         let interfaces = datalink::interfaces();
@@ -48,52 +41,37 @@ impl PacketCapture {
             // If specific interface requested, only use that interface
             // If "any" interface, include all interfaces
             if interface_name == "any" || iface.name == interface_name {
-                for ip_network in &iface.ips {
-                    local_ips.insert(ip_network.ip());
+                if let Some(mac) = iface.mac {
+                    local_macs.insert(mac);
                 }
             }
         }
         
-        local_ips
+        local_macs
     }
 
-    fn determine_direction(packet_data: &[u8], local_ips: &HashSet<IpAddr>) -> TrafficDirection {
+    fn determine_direction(packet_data: &[u8], local_macs: &HashSet<MacAddr>) -> TrafficDirection {
         if let Some(eth_packet) = EthernetPacket::new(packet_data) {
-            match eth_packet.get_ethertype() {
-                EtherTypes::Ipv4 => {
-                    if let Some(ipv4_packet) = Ipv4Packet::new(eth_packet.payload()) {
-                        let src_ip = IpAddr::V4(ipv4_packet.get_source());
-                        let dst_ip = IpAddr::V4(ipv4_packet.get_destination());
-                        
-                        let src_local = local_ips.contains(&src_ip);
-                        let dst_local = local_ips.contains(&dst_ip);
-                        
-                        match (src_local, dst_local) {
-                            (true, false) => TrafficDirection::Outbound,
-                            (false, true) => TrafficDirection::Inbound,
-                            _ => TrafficDirection::Unknown,
-                        }
-                    } else {
-                        TrafficDirection::Unknown
-                    }
-                }
-                EtherTypes::Ipv6 => {
-                    if let Some(ipv6_packet) = Ipv6Packet::new(eth_packet.payload()) {
-                        let src_ip = IpAddr::V6(ipv6_packet.get_source());
-                        let dst_ip = IpAddr::V6(ipv6_packet.get_destination());
-                        
-                        let src_local = local_ips.contains(&src_ip);
-                        let dst_local = local_ips.contains(&dst_ip);
-                        
-                        match (src_local, dst_local) {
-                            (true, false) => TrafficDirection::Outbound,
-                            (false, true) => TrafficDirection::Inbound,
-                            _ => TrafficDirection::Unknown,
-                        }
-                    } else {
-                        TrafficDirection::Unknown
-                    }
-                }
+            let src_mac = eth_packet.get_source();
+            let dst_mac = eth_packet.get_destination();
+            
+            let src_is_local = local_macs.contains(&src_mac);
+            let dst_is_local = local_macs.contains(&dst_mac);
+            
+            // Check for broadcast/multicast destinations
+            let is_broadcast = dst_mac == MacAddr::broadcast();
+            let is_multicast = dst_mac.is_multicast();
+            
+            match (src_is_local, dst_is_local, is_broadcast, is_multicast) {
+                // Source is our interface -> outbound traffic
+                (true, false, _, _) => TrafficDirection::Outbound,
+                // Destination is our interface -> inbound traffic  
+                (false, true, _, _) => TrafficDirection::Inbound,
+                // Broadcast/multicast from our interface -> outbound
+                (true, _, true, _) | (true, _, _, true) => TrafficDirection::Outbound,
+                // Broadcast/multicast to us -> inbound
+                (false, _, true, _) | (false, _, _, true) => TrafficDirection::Inbound,
+                // Internal traffic (both local) or external (neither local) -> unknown
                 _ => TrafficDirection::Unknown,
             }
         } else {
@@ -147,12 +125,12 @@ impl PacketCapture {
         cap.filter(&filter, true)
             .context("Failed to set packet filter")?;
 
-        let local_ips = Self::get_local_ips(&interface);
+        let local_macs = Self::get_local_macs(&interface);
 
         loop {
             match cap.next_packet() {
                 Ok(packet) => {
-                    let direction = Self::determine_direction(&packet.data, &local_ips);
+                    let direction = Self::determine_direction(&packet.data, &local_macs);
                     
                     let packet_info = PacketInfo {
                         timestamp: std::time::SystemTime::now(),

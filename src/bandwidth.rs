@@ -50,7 +50,9 @@ impl BandwidthCalculator {
                     TrafficDirection::Inbound => (in_acc + packet.size as u64, out_acc),
                     TrafficDirection::Outbound => (in_acc, out_acc + packet.size as u64),
                     TrafficDirection::Unknown => {
-                        // Split unknown traffic equally between inbound and outbound
+                        // For router scenarios, unknown traffic (neither source nor dest MAC is ours)
+                        // represents forwarded traffic. We'll count it as transit traffic.
+                        // For now, we'll split it to show total network activity.
                         let half_size = packet.size as u64 / 2;
                         (in_acc + half_size, out_acc + half_size)
                     }

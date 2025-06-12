@@ -80,6 +80,23 @@ tcpgraph -i eth0 -f "host 192.168.1.100"
 tcpgraph -i eth0 -f "udp port 53"
 ```
 
+### Router/Firewall Usage
+
+**Monitor router WAN interface:**
+```bash
+tcpgraph -i eth0 -f "ip"  # All IP traffic on WAN interface
+```
+
+**Monitor router LAN traffic:**
+```bash
+tcpgraph -i br0 -f "tcp"  # TCP traffic on bridge interface
+```
+
+**Monitor all router interfaces:**
+```bash
+tcpgraph -i any -f "ip"  # All IP traffic across all interfaces
+```
+
 ### PCAP Filter Examples
 
 - `tcp`: All TCP traffic
@@ -101,9 +118,16 @@ The application displays:
 - **Bottom panel**: Current inbound/outbound speeds and maximum recorded values
 
 ### Traffic Direction Detection
-- **Specific interfaces** (e.g., eth0, wlan0): Analyzes packet headers to determine local vs remote IPs
-- **"any" interface**: Monitors all network interfaces simultaneously, with smart direction detection across all adapters
-- **Unknown traffic**: Split equally between inbound/outbound for display purposes
+- **MAC Address Analysis**: Uses Layer 2 (Ethernet) frame inspection for accurate direction detection
+- **Router-Friendly**: Works correctly on routers, firewalls, and bridge devices where traffic may not originate locally
+- **Direction Logic**:
+  - **Inbound**: Destination MAC matches local interface(s)
+  - **Outbound**: Source MAC matches local interface(s) 
+  - **Transit/Unknown**: Neither source nor destination MAC is local (router forwarding scenario)
+- **Interface Support**:
+  - **Specific interfaces** (e.g., eth0, wlan0): Uses that interface's MAC address
+  - **"any" interface**: Uses MAC addresses from all active network interfaces
+- **Edge Cases**: Broadcast/multicast traffic properly classified based on source interface
 
 ### Controls
 
