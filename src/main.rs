@@ -10,6 +10,7 @@ use bandwidth::start_bandwidth_monitor;
 use ui::{App, run_ui};
 use std::time::Duration;
 use tokio::signal;
+use pcap;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -65,6 +66,50 @@ fn validate_args(args: &Args) -> Result<()> {
         if duration == 0 {
             anyhow::bail!("Duration must be greater than 0");
         }
+    }
+    
+    // Validate interface exists
+    validate_interface(&args.interface)?;
+    
+    Ok(())
+}
+
+fn validate_interface(interface_name: &str) -> Result<()> {
+    // "any" is always valid as a pseudo-interface
+    if interface_name == "any" {
+        return Ok(());
+    }
+    
+    // Get list of available interfaces
+    let interfaces = pcap::Device::list()
+        .context("Failed to list network interfaces")?;
+    
+    // Check if the specified interface exists
+    let interface_exists = interfaces
+        .iter()
+        .any(|device| device.name == interface_name);
+    
+    if !interface_exists {
+        let mut available_interfaces = Vec::new();
+        
+        // Always include "any" as an option
+        available_interfaces.push("any (Pseudo-device that captures on all interfaces)".to_string());
+        
+        // Add all real interfaces
+        for device in interfaces {
+            let description = device.desc.as_deref().unwrap_or("No description");
+            available_interfaces.push(format!("{} ({})", device.name, description));
+        }
+        
+        anyhow::bail!(
+            "Interface '{}' not found.\n\nAvailable interfaces:\n{}",
+            interface_name,
+            available_interfaces
+                .iter()
+                .map(|iface| format!("  - {}", iface))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
     }
     
     Ok(())

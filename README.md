@@ -9,6 +9,7 @@ A terminal-based network bandwidth monitor that captures packets using pcap filt
 - Live bandwidth visualization with dual-line graphs (green=inbound, red=outbound) 
 - Intelligent speed bucket scaling (auto-adjusts from 0-10 Mbps to 1000+ Mbps)
 - **Smart traffic direction detection** - works with specific interfaces and the "any" pseudo-interface
+- **Interface validation on startup** - automatically lists available interfaces if invalid one specified
 - Configurable update intervals 
 - Supports any network interface including "any" for all-interface monitoring
 - Graceful shutdown with Ctrl+C
@@ -155,8 +156,19 @@ sudo setcap cap_net_raw,cap_net_admin=eip ./target/release/tcpgraph
 - Ensure your user has access to network interfaces
 
 **"Interface not found" errors:**
-- List available interfaces: `ip link show` (Linux) or `ifconfig` (macOS)
+- tcpgraph will automatically list all available interfaces if you specify an invalid one:
+```
+$ tcpgraph -i invalid -f "tcp"
+Error: Interface 'invalid' not found.
+
+Available interfaces:
+  - any (Pseudo-device that captures on all interfaces)
+  - eth0 (Ethernet)
+  - wlan0 (Wireless)
+  - lo (Loopback)
+```
 - Use the exact interface name (e.g., `eth0`, `wlan0`, `en0`)
+- Use `any` to monitor all interfaces simultaneously
 
 **"Failed to set packet filter" errors:**
 - Verify your pcap filter syntax
