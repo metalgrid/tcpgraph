@@ -5,11 +5,12 @@ A terminal-based network bandwidth monitor that captures packets using pcap filt
 ## Features
 
 - Real-time packet capture with pcap filtering
-- Live bandwidth visualization in the terminal with grid lines
+- **Bidirectional traffic monitoring** - separate inbound and outbound bandwidth tracking
+- Live bandwidth visualization with dual-line graphs (green=inbound, red=outbound) 
 - Intelligent speed bucket scaling (auto-adjusts from 0-10 Mbps to 1000+ Mbps)
-- Speed category indicators (Very Slow, Slow, Basic, Fast, Very Fast, Superfast, Ultra Fast)
+- **Smart traffic direction detection** - works with specific interfaces and the "any" pseudo-interface
 - Configurable update intervals 
-- Supports any network interface
+- Supports any network interface including "any" for all-interface monitoring
 - Graceful shutdown with Ctrl+C
 - Cross-platform terminal UI
 
@@ -59,6 +60,11 @@ tcpgraph -i eth0 -f "tcp port 80"
 tcpgraph -i wlan0 -f "tcp" --interval 2
 ```
 
+**Monitor all interfaces (useful for complex network setups):**
+```bash
+tcpgraph -i any -f "tcp"
+```
+
 **Monitor SSH traffic for 60 seconds:**
 ```bash
 tcpgraph -i eth0 -f "tcp port 22" --duration 60
@@ -89,17 +95,15 @@ tcpgraph -i eth0 -f "udp port 53"
 
 The application displays:
 - **Top panel**: Interface name and current filter
-- **Middle panel**: Real-time bandwidth graph (Mbps over time) with intelligent scaling and grid lines
-- **Bottom panel**: Current bandwidth with speed category, maximum recorded bandwidth
+- **Middle panel**: Real-time dual-line bandwidth graph (Mbps over time) with intelligent scaling and grid lines
+  - **Green line**: Inbound traffic (downloads)
+  - **Red line**: Outbound traffic (uploads)
+- **Bottom panel**: Current inbound/outbound speeds and maximum recorded values
 
-### Speed Categories
-- **Very Slow**: < 1 Mbps (Red)
-- **Slow**: 1-10 Mbps (Yellow) 
-- **Basic**: 10-25 Mbps (Blue)
-- **Fast**: 25-50 Mbps (Green)
-- **Very Fast**: 50-100 Mbps (Cyan)
-- **Superfast**: 100-250 Mbps (Magenta)
-- **Ultra Fast**: 250+ Mbps (White)
+### Traffic Direction Detection
+- **Specific interfaces** (e.g., eth0, wlan0): Analyzes packet headers to determine local vs remote IPs
+- **"any" interface**: Monitors all network interfaces simultaneously, with smart direction detection across all adapters
+- **Unknown traffic**: Split equally between inbound/outbound for display purposes
 
 ### Controls
 

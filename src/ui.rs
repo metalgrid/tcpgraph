@@ -13,15 +13,19 @@ use ratatui::{
     widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph},
     Frame, Terminal,
 };
+use crate::bandwidth::DirectionalBandwidth;
 use std::collections::VecDeque;
 use std::io;
 use std::sync::mpsc;
 use std::time::Duration;
 
 pub struct App {
-    pub bandwidth_data: VecDeque<(f64, f64)>,
-    pub current_bandwidth: f64,
-    pub max_bandwidth: f64,
+    pub inbound_data: VecDeque<(f64, f64)>,
+    pub outbound_data: VecDeque<(f64, f64)>,
+    pub current_inbound: f64,
+    pub current_outbound: f64,
+    pub max_inbound: f64,
+    pub max_outbound: f64,
     pub interface: String,
     pub filter: String,
     pub should_quit: bool,
@@ -31,9 +35,12 @@ pub struct App {
 impl App {
     pub fn new(interface: String, filter: String) -> Self {
         Self {
-            bandwidth_data: VecDeque::new(),
-            current_bandwidth: 0.0,
-            max_bandwidth: 0.0,
+            inbound_data: VecDeque::new(),
+            outbound_data: VecDeque::new(),
+            current_inbound: 0.0,
+            current_outbound: 0.0,
+            max_inbound: 0.0,
+            max_outbound: 0.0,
             interface,
             filter,
             should_quit: false,
@@ -41,17 +48,25 @@ impl App {
         }
     }
 
-    pub fn update(&mut self, bandwidth: f64) {
-        self.current_bandwidth = bandwidth;
-        self.max_bandwidth = self.max_bandwidth.max(bandwidth);
+    pub fn update(&mut self, bandwidth: DirectionalBandwidth) {
+        self.current_inbound = bandwidth.inbound;
+        self.current_outbound = bandwidth.outbound;
+        self.max_inbound = self.max_inbound.max(bandwidth.inbound);
+        self.max_outbound = self.max_outbound.max(bandwidth.outbound);
         
         let x = self.tick_count as f64;
         // Convert bytes/s to Mbps: bytes/s * 8 bits/byte / 1,000,000 bits/Mbps
-        let mbps = bandwidth * 8.0 / 1_000_000.0;
-        self.bandwidth_data.push_back((x, mbps));
+        let inbound_mbps = bandwidth.inbound * 8.0 / 1_000_000.0;
+        let outbound_mbps = bandwidth.outbound * 8.0 / 1_000_000.0;
         
-        if self.bandwidth_data.len() > 100 {
-            self.bandwidth_data.pop_front();
+        self.inbound_data.push_back((x, inbound_mbps));
+        self.outbound_data.push_back((x, outbound_mbps));
+        
+        if self.inbound_data.len() > 100 {
+            self.inbound_data.pop_front();
+        }
+        if self.outbound_data.len() > 100 {
+            self.outbound_data.pop_front();
         }
         
         self.tick_count += 1;
@@ -64,7 +79,7 @@ impl App {
 
 pub fn run_ui(
     mut app: App,
-    bandwidth_rx: mpsc::Receiver<f64>,
+    bandwidth_rx: mpsc::Receiver<DirectionalBandwidth>,
     update_interval: Duration,
 ) -> Result<()> {
     enable_raw_mode()?;
@@ -141,14 +156,23 @@ fn ui(f: &mut Frame, app: &App) {
     
     f.render_widget(title, chunks[0]);
 
-    let chart_data: Vec<(f64, f64)> = app.bandwidth_data.iter().cloned().collect();
+    let inbound_data: Vec<(f64, f64)> = app.inbound_data.iter().cloned().collect();
+    let outbound_data: Vec<(f64, f64)> = app.outbound_data.iter().cloned().collect();
     
-    let datasets = vec![Dataset::default()
-        .name("Bandwidth (Mbps)")
-        .marker(symbols::Marker::Braille)
-        .style(Style::default().fg(Color::Cyan))
-        .graph_type(GraphType::Line)
-        .data(&chart_data)];
+    let datasets = vec![
+        Dataset::default()
+            .name("Inbound (Mbps)")
+            .marker(symbols::Marker::Braille)
+            .style(Style::default().fg(Color::Green))
+            .graph_type(GraphType::Line)
+            .data(&inbound_data),
+        Dataset::default()
+            .name("Outbound (Mbps)")
+            .marker(symbols::Marker::Braille)
+            .style(Style::default().fg(Color::Red))
+            .graph_type(GraphType::Line)
+            .data(&outbound_data),
+    ];
 
     let x_max = if app.tick_count > 100 {
         app.tick_count as f64
@@ -162,8 +186,11 @@ fn ui(f: &mut Frame, app: &App) {
     };
 
     // Calculate appropriate y-axis scale with speed buckets
-    let current_mbps = app.current_bandwidth * 8.0 / 1_000_000.0;
-    let max_mbps = app.max_bandwidth * 8.0 / 1_000_000.0;
+    let current_inbound_mbps = app.current_inbound * 8.0 / 1_000_000.0;
+    let current_outbound_mbps = app.current_outbound * 8.0 / 1_000_000.0;
+    let max_inbound_mbps = app.max_inbound * 8.0 / 1_000_000.0;
+    let max_outbound_mbps = app.max_outbound * 8.0 / 1_000_000.0;
+    let max_mbps = max_inbound_mbps.max(max_outbound_mbps);
     
     // Determine appropriate scale based on current speeds
     let y_max = if max_mbps < 10.0 {
@@ -269,38 +296,26 @@ fn ui(f: &mut Frame, app: &App) {
 
     f.render_widget(chart, chunks[1]);
 
-    // Determine speed bucket category
-    let speed_category = if current_mbps < 1.0 {
-        ("Very Slow", Color::Red)
-    } else if current_mbps < 10.0 {
-        ("Slow", Color::Yellow)
-    } else if current_mbps < 25.0 {
-        ("Basic", Color::Blue)
-    } else if current_mbps < 50.0 {
-        ("Fast", Color::Green)
-    } else if current_mbps < 100.0 {
-        ("Very Fast", Color::Cyan)
-    } else if current_mbps < 250.0 {
-        ("Superfast", Color::Magenta)
-    } else {
-        ("Ultra Fast", Color::White)
-    };
-
     let current_info = Paragraph::new(vec![
         Line::from(vec![
-            Span::raw("Current: "),
+            Span::raw("↓ In: "),
             Span::styled(
-                format!("{:.2} Mbps", current_mbps),
+                format!("{:.2} Mbps", current_inbound_mbps),
                 Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
             ),
-            Span::raw(" ("),
+            Span::raw(" | ↑ Out: "),
             Span::styled(
-                speed_category.0,
-                Style::default().fg(speed_category.1).add_modifier(Modifier::BOLD),
+                format!("{:.2} Mbps", current_outbound_mbps),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ),
-            Span::raw(") | Max: "),
+            Span::raw(" | Max: ↓"),
             Span::styled(
-                format!("{:.2} Mbps", max_mbps),
+                format!("{:.1}", max_inbound_mbps),
+                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" ↑"),
+            Span::styled(
+                format!("{:.1}", max_outbound_mbps),
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ),
             Span::raw(" | Press 'q' to quit"),
